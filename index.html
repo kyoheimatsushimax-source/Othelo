@@ -230,13 +230,17 @@
   .disc.flip-w { transform: rotateY(180deg); }
   .disc.pop { animation: pop .35s cubic-bezier(.3, 1.6, .5, 1); }
   @keyframes pop { 0% { scale: 0; } 70% { scale: 1.15; } 100% { scale: 1; } }
+  /* 【重要】ここに filter: drop-shadow() を書くと、
+     コマ1つにつき SVG 2枚 ＝ 盤が埋まると 128枚ぶんの
+     GPUフィルタ処理が かかる。iPhone では これが 描画プロセスの
+     メモリを 使いきり、終盤ほど 落ちやすくなっていた。
+     影は SVG の中に ただの円として 描くように 変更（GPU負荷ゼロ）。 */
   .disc svg {
     position: absolute;
     inset: 0;
     width: 100%;
     height: 100%;
     backface-visibility: hidden;
-    filter: drop-shadow(0 2px 1px rgba(0,0,0,.2));
   }
   .disc svg.side-w { transform: rotateY(180deg); }
 
@@ -361,7 +365,7 @@
   .floor-row .fl-state { font-size: 14px; }
   .floor-row.cleared { background: #f0fbe4; }
   .floor-row.current { border-color: var(--accent); background: #fff6dd; }
-  .floor-row.locked { opacity: .45; cursor: default; filter: grayscale(.7); }
+  .floor-row.locked { opacity: .45; cursor: default; }
 
   /* ---- XPバー ---- */
   .xpwrap { margin: 8px 0 4px; }
@@ -443,7 +447,7 @@
       <button class="secondary" data-mode="pvp">👫 ふたりであそぶ</button>
     </div>
     <p class="errbox" id="errBox" style="display:none"></p>
-    <p style="margin-top:6px;font-size:10px;color:#c3a882;">v7</p>
+    <p style="margin-top:6px;font-size:10px;color:#c3a882;">v8</p>
   </div>
 </div>
 
@@ -566,7 +570,8 @@ function charSvgInner(key, mood) {
   const eyes = key === "kero"
     ? "" // かえるは目が上にあるので顔の目は省略
     : `<circle cx="38" cy="48" r="${pupil}" fill="${eye}"/><circle cx="62" cy="48" r="${pupil}" fill="${eye}"/>`;
-  return `${ears}
+  return `<circle cx="50" cy="55.5" r="40" fill="rgba(0,0,0,.16)"/>
+    ${ears}
     <circle cx="50" cy="52" r="40" fill="${body}" stroke="${edge}" stroke-width="5"/>
     ${extra}
     ${eyes}
@@ -993,7 +998,9 @@ function opponentComment(prevBoard, r, c, mover) {
 }
 
 /* ================= 読み上げ（5さいでも 耳で わかるように） ================= */
-let speakOn = (() => { try { return localStorage.getItem("fr_voice") !== "0"; } catch (e) { return true; } })();
+// iPhone の読み上げは 固まる原因に なりやすいので、はじめは オフ。
+// 🔊ボタンで いつでも オンにできる（せっていは 端末に のこる）。
+let speakOn = (() => { try { return localStorage.getItem("fr_voice") === "1"; } catch (e) { return false; } })();
 /* iPhone の読み上げは、みじかい間に なんども よぶと つまって
    ページごと 反応しなくなることがある。1.1びょうの 間隔をあけ、
    長い文は 切って わたす。 */
@@ -1543,7 +1550,7 @@ function openDungeon() {
     const locked = floorNum > clearedFloor + 1;
     row.className = "floor-row" + (isCleared ? " cleared" : "") + (isCurrent ? " current" : "") + (locked ? " locked" : "");
     row.innerHTML = `
-      <div class="face">${locked ? faceSvg(fl.char).replace("<svg", '<svg style="filter:brightness(0) opacity(.25)"') : faceSvg(fl.char)}</div>
+      <div class="face">${locked ? `<div style="width:100%;height:100%;border-radius:50%;background:#c9bda8;opacity:.45"></div>` : faceSvg(fl.char)}</div>
       <div class="fl-info">
         <div class="fl-name">${floorNum}かい ${locked ? "???" : CHARS[fl.char].name}</div>
         <div class="fl-sub">${locked ? "まえの かいを クリアすると すすめるよ" : fl.sub}</div>
