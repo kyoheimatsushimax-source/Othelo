@@ -11,8 +11,9 @@
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="default">
 <meta name="apple-mobile-web-app-title" content="ふたごリバーシ">
-<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
-<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="./apple-touch-icon.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="./icon-192.png">
 <style>
   :root {
     --bg: #fdf3e3;
@@ -280,6 +281,12 @@
     color: #6b4f2e;
   }
   .review-box b { color: #c07a1e; }
+  .errbox {
+    margin-top: 8px; padding: 6px 8px; border-radius: 8px;
+    background: #fdecec; border: 1px solid #f0b8b8; color: #a04040;
+    font-size: 10px; line-height: 1.4; text-align: left; word-break: break-all;
+    cursor: pointer;
+  }
 
   /* ---- オーバーレイ ---- */
   .overlay {
@@ -435,6 +442,8 @@
       <button data-mode="hard">🔥 つよい CPU とあそぶ</button>
       <button class="secondary" data-mode="pvp">👫 ふたりであそぶ</button>
     </div>
+    <p class="errbox" id="errBox" style="display:none"></p>
+    <p style="margin-top:6px;font-size:10px;color:#c3a882;">v7</p>
   </div>
 </div>
 
@@ -978,24 +987,39 @@ function opponentComment(prevBoard, r, c, mover) {
   const chance = cornersOpenTo(after, me);
   if (chance.length) return { text: `チャンス! ★のかどに おけるよ。かどを とっちゃおう!`, mood: "smile", point: chance[0] };
   const myMob = validMoves(after, me).length;
-  if (myMob <= 2) return { text: `おける ばしょが ${myMob}こしか ない…。すこし くるしいけど おちついて いこう!`, mood: "think" };
+  if (myMob <= 2 && phaseOf(after) !== "終盤") return { text: `おける ばしょが ${myMob}こしか ない…。すこし くるしいけど おちついて いこう!`, mood: "think" };
   if (isXSquare(r, c) || isCSquare(r, c)) return { text: `${name}が かどの ちかくに おいたよ。かどが とれないか 見てみよう!`, mood: "smile" };
   return null;
 }
 
 /* ================= 読み上げ（5さいでも 耳で わかるように） ================= */
 let speakOn = (() => { try { return localStorage.getItem("fr_voice") !== "0"; } catch (e) { return true; } })();
-function speak(text) {
+/* iPhone の読み上げは、みじかい間に なんども よぶと つまって
+   ページごと 反応しなくなることがある。1.1びょうの 間隔をあけ、
+   長い文は 切って わたす。 */
+let lastSpeakAt = 0;
+function speak(text, force) {
   if (!speakOn || typeof speechSynthesis === "undefined") return;
+  const now = Date.now();
+  if (!force && now - lastSpeakAt < 1100) return;
+  lastSpeakAt = now;
   try {
     speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(String(text).replace(/[⭐★🎉🏆◎○△]/g, " ").trim());
+    let t = String(text).replace(/[⭐★🎉🏆◎○△]/g, " ").replace(/\s+/g, " ").trim();
+    if (t.length > 60) t = t.slice(0, 60);
+    const u = new SpeechSynthesisUtterance(t);
     u.lang = "ja-JP";
     u.rate = 0.95;
     u.pitch = 1.2;
     speechSynthesis.speak(u);
   } catch (e) { /* しゃべれない環境では だまっておく */ }
 }
+// アプリを 閉じる/かくすときは 読み上げを 止める（iPhoneで つまる原因）
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden && typeof speechSynthesis !== "undefined") {
+    try { speechSynthesis.cancel(); } catch (e) {}
+  }
+});
 
 /* ================= ふきだし ================= */
 let teacherMood = "";
@@ -1049,10 +1073,17 @@ document.addEventListener("touchend", ensureAudio, { passive: true });
 document.addEventListener("click", ensureAudio, true);
 document.addEventListener("visibilitychange", () => { if (!document.hidden) ensureAudio(); });
 
+/* 終盤は 一度に 18まいも ひっくりかえる。
+   そのたびに オシレーターを 作ると iPhone では 音のノードが たまり、
+   メモリを 使いきって Safari に アプリを 終了されることがある。
+   同時に 鳴らす数を かぎり、鳴りおわったら かならず 切りはなす。 */
+let liveVoices = 0;
+const MAX_VOICES = 6;
 function beep(freq, dur, type = "sine", vol = .15, delay = 0) {
   try {
     ensureAudio();
     if (!audioCtx || audioCtx.state !== "running") return;
+    if (liveVoices >= MAX_VOICES) return;
     const t = audioCtx.currentTime + delay;
     const osc = audioCtx.createOscillator();
     const g = audioCtx.createGain();
@@ -1060,6 +1091,8 @@ function beep(freq, dur, type = "sine", vol = .15, delay = 0) {
     g.gain.setValueAtTime(vol, t);
     g.gain.exponentialRampToValueAtTime(.001, t + dur);
     osc.connect(g).connect(audioCtx.destination);
+    liveVoices++;
+    osc.onended = () => { liveVoices--; try { osc.disconnect(); g.disconnect(); } catch (e) {} };
     osc.start(t); osc.stop(t + dur);
   } catch (e) { /* 音が出せない環境では無視 */ }
 }
@@ -1108,6 +1141,12 @@ function recover(err) {
   if (recovering) return;
   recovering = true;
   try { console.error(err); } catch (e) {}
+  // なにが おきたのかを あとで 見られるように のこしておく
+  try {
+    const msg = (err && (err.stack || err.message)) || String(err);
+    localStorage.setItem("fr_lasterr", new Date().toISOString().slice(0, 16) + " / " +
+      (mode || "?") + (dungeonFloor ? dungeonFloor + "F" : "") + " / " + String(msg).slice(0, 300));
+  } catch (e) {}
   try {
     cancelTimers();
     setBusy(false);
@@ -1153,7 +1192,9 @@ function clearDiscs() {
   }
 }
 
+let flipSounds = 0;
 function render(newDisc = null, flipped = []) {
+  flipSounds = 0;
   const flipSet = new Set(flipped.map(([r, c]) => r * SIZE + c));
   for (let r = 0; r < SIZE; r++) {
     for (let c = 0; c < SIZE; c++) {
@@ -1174,11 +1215,14 @@ function render(newDisc = null, flipped = []) {
       const targetClass = v === B ? "flip-b" : "flip-w";
       if (!disc.classList.contains(targetClass)) {
         if (flipSet.has(idx) && newDisc) {
-          const delay = 60 * (Math.abs(r - newDisc[0]) + Math.abs(c - newDisc[1]));
+          // 終盤に 大量に ひっくりかえるときの 音とタイマーの あふれを おさえる
+          const delay = Math.min(480, 60 * (Math.abs(r - newDisc[0]) + Math.abs(c - newDisc[1])));
+          const withSound = flipSounds < 5;
+          flipSounds++;
           later(() => {
             disc.classList.remove("flip-b", "flip-w");
             disc.classList.add(targetClass);
-            sndFlip();
+            if (withSound) sndFlip();
           }, delay);
         } else {
           disc.classList.remove("flip-b", "flip-w");
@@ -1357,8 +1401,8 @@ function finishGame() {
   if (gameOver) return;   // 二重によばれても XPを 二重に あげない
   gameOver = true;
   setBusy(true);
-  cancelTimers();
-  clearMarks();
+  clearMarks();   // ※ここで cancelTimers() はしない。
+                  //   さいごの一手の めくれアニメが 消えてしまうため。
   const [nb, nw] = countDiscs(board);
   const playerWon = nb > nw;
   const title = document.getElementById("resultTitle");
@@ -1513,6 +1557,14 @@ function openDungeon() {
 }
 
 /* ================= メニュー・ボタン ================= */
+function showLastError() {
+  const box = document.getElementById("errBox");
+  let v = "";
+  try { v = localStorage.getItem("fr_lasterr") || ""; } catch (e) {}
+  if (!v) { box.style.display = "none"; return; }
+  box.style.display = "";
+  box.textContent = "まえに おきた エラー: " + v;
+}
 function buildCharSelect() {
   const row = document.getElementById("charRow");
   row.innerHTML = "";
@@ -1561,12 +1613,17 @@ document.getElementById("btnUndo").addEventListener("click", () => {
   setBanner(sideName(turn) + "のばん!");
   showTeacher("まったなしOK! こんどは どこに おくか、じっくり かんがえてみよう。", "", "think");
 });
+document.getElementById("errBox").addEventListener("click", () => {
+  try { localStorage.removeItem("fr_lasterr"); } catch (e) {}
+  showLastError();
+});
 document.getElementById("btnMenu").addEventListener("click", () => {
   // いま すすんでいる対局の よやくを すべて とめる（前の対局が わりこむのを ふせぐ）
   gameId++;
   cancelTimers();
   setBusy(true);
   buildCharSelect();
+  showLastError();
   document.getElementById("menuOverlay").classList.remove("hidden");
 });
 function openP2Select() {
@@ -1608,6 +1665,7 @@ if ("serviceWorker" in navigator && location.protocol.startsWith("http")) {
 /* ================= 初期化 ================= */
 document.getElementById("teacherFace").innerHTML = faceSvg("hoo");
 buildCharSelect();
+showLastError();
 updateLevelBadge();
 buildBoard();
 board = newBoard();

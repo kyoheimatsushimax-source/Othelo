@@ -2,19 +2,24 @@
  * ゲームに必要なファイルをすべてキャッシュして、オフラインでも遊べるようにする。
  * index.html などを更新したときは CACHE_VERSION を上げること。
  */
-const CACHE_VERSION = "futago-reversi-v6";
+const CACHE_VERSION = "futago-reversi-v7";
 const ASSETS = [
   "./",
   "./index.html",
   "./manifest.webmanifest",
-  "./icons/icon-192.png",
-  "./icons/icon-512.png",
-  "./icons/apple-touch-icon.png",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./apple-touch-icon.png",
 ];
 
+/* addAll は 1つでも 404 だと ぜんぶ 失敗して SW が入らない。
+   （前の版で icons/ が無く、まさに これが おきていた）
+   1ファイルずつ 入れて、こけても 残りは キャッシュする。 */
 self.addEventListener("install", (event) => {
   event.waitUntil(
-    caches.open(CACHE_VERSION).then((cache) => cache.addAll(ASSETS)).then(() => self.skipWaiting())
+    caches.open(CACHE_VERSION)
+      .then((cache) => Promise.all(ASSETS.map((u) => cache.add(u).catch(() => null))))
+      .then(() => self.skipWaiting())
   );
 });
 
